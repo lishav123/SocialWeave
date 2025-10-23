@@ -5,9 +5,9 @@ from pydantic import BaseModel
 
 # Import our models and helpers
 from database import get_session
-from models import User
+from models import User, Post   
 from security import hash_password, verify_password
-from auth import create_access_token
+from auth import create_access_token, get_current_user
 
 app = FastAPI()
 
@@ -35,6 +35,18 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+class PostCreate(SQLModel):
+    description: str 
+
+class PostRead(SQLModel):
+    id: int
+    description: str
+    
+    # This is the new part:
+    # We're telling this model to include the data
+    # from our UserRead model, nested under a "user" key.
+    user: UserRead
 
 # This is our "Hello World" route
 @app.get("/")
@@ -101,3 +113,25 @@ def login_user(
     # Return the token in our Token response model
     return Token(access_token=access_token)
     
+@app.post("/posts", response_model=PostRead) # <-- THIS IS THE CHANGE
+def create_post(
+    post_data: PostCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)]
+):
+    # 1. Create the new Post object
+    new_post = Post(
+        description=post_data.description, 
+        user_id=current_user.id
+    )
+    
+    # 2. Add, commit, and refresh
+    session.add(new_post)
+    session.commit()
+    session.refresh(new_post)
+    
+    # 3. Return the new post
+    # FastAPI will see "response_model=PostRead" and
+    # automatically fetch the "user" relationship
+    # and filter it using the UserRead model.
+    return new_post
