@@ -1,8 +1,8 @@
-"""Add relationships to User and Post
+"""gives the relationship of likes
 
-Revision ID: 8f8ee5f31957
-Revises: 8ce84e480554
-Create Date: 2025-10-23 08:12:39.327798
+Revision ID: 349584bd9520
+Revises: 0396cab5f3ab
+Create Date: 2025-10-25 00:25:27.884294
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '8f8ee5f31957'
-down_revision: Union[str, Sequence[str], None] = '8ce84e480554'
+revision: str = '349584bd9520'
+down_revision: Union[str, Sequence[str], None] = '0396cab5f3ab'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

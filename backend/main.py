@@ -1,137 +1,210 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlmodel import Session, select, SQLModel
-from typing import Annotated
+from typing import Annotated, List
 from pydantic import BaseModel
 
-# Import our models and helpers
+# --- Import Our App Modules ---
 from database import get_session
-from models import User, Post   
+from models import User, Post, Comment, Like, Follow
 from security import hash_password, verify_password
 from auth import create_access_token, get_current_user
 
+# ====================================================================
+#  App Initialization
+# ====================================================================
+
 app = FastAPI()
 
-# This is a Pydantic model for receiving data
-# We can't just use `User` because the user sends a plain password,
-# but our `User` model has a `hashed_password`
+# ====================================================================
+#  "Order Form" 📝 (Input Models)
+# ====================================================================
+
 class UserCreate(SQLModel):
+    """Data needed to create a new user."""
     email: str
     username: str
     password: str
-    location: str | None = None # Use `| None` to make it optional
-
-# This is a Pydantic model for *sending* data back
-# We never want to send the `hashed_password` back to the user
-class UserRead(SQLModel):
-    id: int
-    email: str
-    username: str
     location: str | None = None
 
 class UserLogin(BaseModel):
+    """Data needed for a user to log in."""
     email: str
     password: str
 
+class PostCreate(SQLModel):
+    """Data needed to create a new post."""
+    description: str
+    media_url: str | None = None
+
+# ====================================================================
+#  "Receipt" 🧾 (Output Models)
+# ====================================================================
+
+# We use BaseModel and `orm_mode` to create "receipts"
+# that safely read data from our SQLModel objects.
+
+class UserRead(BaseModel):
+    """Public data for a User (hides password)."""
+    id: int
+    username: str
+    location: str | None = None
+    
+    class Config:
+        orm_mode = True
+
+class CommentRead(BaseModel):
+    """Public data for a Comment."""
+    id: int
+    text: str
+    user: UserRead  # Nests the user who wrote the comment
+    
+    class Config:
+        orm_mode = True
+
+class LikeRead(BaseModel):
+    """Public data for a Like."""
+    user: UserRead # Nests the user who liked the post
+    
+    class Config:
+        orm_mode = True
+
+class PostRead(BaseModel):
+    """The "Master Receipt" for a single Post."""
+    id: int
+    description: str
+    media_url: str | None = None
+    
+    user: UserRead               # Nests the author
+    comments: List[CommentRead]  # Nests a LIST of comments
+    likes: List[LikeRead]        # Nests a LIST of likes
+
+    class Config:
+        orm_mode = True
+
 class Token(BaseModel):
+    """The "Receipt" for a successful login."""
     access_token: str
     token_type: str = "bearer"
 
-class PostCreate(SQLModel):
-    description: str 
+# ====================================================================
+#  API Endpoints ("Doors" 🚪)
+# ====================================================================
 
-class PostRead(SQLModel):
-    id: int
-    description: str
-    
-    # This is the new part:
-    # We're telling this model to include the data
-    # from our UserRead model, nested under a "user" key.
-    user: UserRead
-
-# This is our "Hello World" route
 @app.get("/")
 def read_root():
     return {"Hello": "Backend"}
 
+# --- Auth Doors ---
 
-# This is our new Registration route
 @app.post("/register", response_model=UserRead)
 def register_user(
-    # Get a DB session from our dependency
     session: Annotated[Session, Depends(get_session)],
-    # Get the user data from the request body
     user_data: UserCreate
 ):
-    # 1. Check if user already exists
-    #    (This check should be more robust, but it's a start)
+    """Creates a new user in the database."""
     db_user = session.exec(
         select(User).where(
             (User.email == user_data.email) | (User.username == user_data.username)
         )
     ).first()
-
     if db_user:
         raise HTTPException(status_code=400, detail="Email or username already exists")
 
-    # 2. Hash the new user's password
     hashed_pass = hash_password(user_data.password)
-
-    # 3. Create a new User object from our models
-    #    We use .model_dump() to get the data from the input
     new_user = User.model_validate(user_data, update={"hashed_password": hashed_pass})
     
-    # 4. Add the user to the session and commit
     session.add(new_user)
     session.commit()
-    session.refresh(new_user) # Get the new ID from the DB
-
-    # 5. Return the newly created user (as a UserRead model)
+    session.refresh(new_user)
     return new_user
 
-@app.post("/login", response_model=Token) # <-- USE THE TOKEN RESPONSE MODEL
+@app.post("/login", response_model=Token)
 def login_user(
     session: Annotated[Session, Depends(get_session)],
     login_info: UserLogin
 ):
+    """Logs a user in by verifying credentials and returning a JWT."""
     user = session.exec(
         select(User).where(User.email == login_info.email)
     ).first()
 
     if not user or not verify_password(login_info.password, user.hashed_password):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, # Use a 401 status for bad logins
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
 
-    # --- This is the new part ---
-    # Create the data "payload" for our token
     token_data = {"user_id": user.id, "username": user.username}
-    
-    # Create the token
     access_token = create_access_token(data=token_data)
-
-    # Return the token in our Token response model
     return Token(access_token=access_token)
-    
-@app.post("/posts", response_model=PostRead) # <-- THIS IS THE CHANGE
+
+# --- User Doors ---
+
+@app.get("/users/search", response_model=List[UserRead])
+def search_users(
+    query: str,
+    session: Annotated[Session, Depends(get_session)]
+):
+    """Finds users whose username contains the query string."""
+    users = session.exec(
+        select(User).where(User.username.contains(query))
+    ).all()
+    return users
+
+@app.post("/users/{user_id_to_follow}/follow", status_code=status.HTTP_201_CREATED)
+def follow_user(
+    user_id_to_follow: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Creates a "Follow" relationship between the current user and another user."""
+    if user_id_to_follow == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Cannot follow yourself"
+        )
+
+    follow_relationship = Follow(
+        follower_id=current_user.id,
+        followed_id=user_id_to_follow
+    )
+    session.add(follow_relationship)
+    session.commit()
+    return {"message": f"Successfully followed user {user_id_to_follow}"}
+
+# --- Post & Feed Doors (Locked 🔒) ---
+
+@app.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
 def create_post(
     post_data: PostCreate,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)]
 ):
-    # 1. Create the new Post object
+    """Creates a new post as the currently logged-in user."""
     new_post = Post(
-        description=post_data.description, 
+        description=post_data.description,
+        media_url=post_data.media_url,
         user_id=current_user.id
     )
     
-    # 2. Add, commit, and refresh
     session.add(new_post)
     session.commit()
     session.refresh(new_post)
-    
-    # 3. Return the new post
-    # FastAPI will see "response_model=PostRead" and
-    # automatically fetch the "user" relationship
-    # and filter it using the UserRead model.
     return new_post
+
+@app.get("/feed", response_model=List[PostRead])
+def get_user_feed(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)]
+):
+    """Gets the feed for the current user (posts from people they follow + their own)."""
+    following_ids = [user.id for user in current_user.following]
+    following_ids.append(current_user.id) 
+
+    posts = session.exec(
+        select(Post)
+        .where(Post.user_id.in_(following_ids))
+        .order_by(Post.id.desc()) # Get newest posts first
+    ).all()
+    
+    return posts
