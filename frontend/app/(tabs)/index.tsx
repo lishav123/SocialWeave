@@ -1,36 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  FlatList, 
-  Alert, 
-  Image, 
-  ActivityIndicator 
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  Alert,
+  Image,
+  ActivityIndicator,
+  Pressable,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 // ====================================================================
-//  TypeScript Type Definitions ("Blueprints" 📖 for our data)
+//  TypeScript Type Definitions
 // ====================================================================
 
-// This defines the expected structure of a User "receipt" from our backend
 type UserRead = {
   id: number;
   username: string;
-  location?: string | null; // Optional, can be string or null
+  location?: string | null;
 };
 
-// This defines the expected structure of a Post "receipt" from our backend
+type LikeRead = {
+  user: UserRead;
+};
+
+// type CommentRead = { ... }; // Define later if needed
+
 type PostRead = {
   id: number;
   description: string;
-  media_url: string | null; // Can be a string (URL) or null
-  user: UserRead; // A post has a nested UserRead object for its author
-  // We're not using comments/likes yet, but they'd be like:
+  media_url: string | null;
+  user: UserRead;
+  likes: LikeRead[];
   // comments: CommentRead[];
-  // likes: LikeRead[];
 };
 
 // ====================================================================
@@ -38,57 +43,119 @@ type PostRead = {
 // ====================================================================
 
 export default function FeedScreen() {
-  // Use 'PostRead[]' to tell TypeScript that 'posts' is an array of PostRead objects
   const [posts, setPosts] = useState<PostRead[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserRead | null>(null); // State for logged-in user details
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    const fetchFeed = async () => {
+    const initializeFeed = async () => {
+      setIsLoading(true);
+      let token: string | null = null; // Declare token here
+
       try {
-        const token = await AsyncStorage.getItem("token");
+        token = await AsyncStorage.getItem("token");
 
         if (!token) {
-          Alert.alert("Authentication Required", "Please log in to view your feed.");
           router.replace("/(auth)/login");
           return;
         }
 
-        const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/feed`, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${token}`
-          },
+        // --- 1. Fetch Current User Details ---
+        const userResponse = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/users/me`, {
+          headers: { "Authorization": `Bearer ${token}` },
         });
 
-        if (response.status === 401) {
-          Alert.alert("Session Expired", "Your session has expired. Please log in again.");
-          await AsyncStorage.removeItem("token");
-          router.replace("/(auth)/login");
-          return;
-        }
+        if (userResponse.status === 401) throw new Error("Session Expired");
+        if (!userResponse.ok) throw new Error("Failed to fetch user details");
 
-        if (!response.ok) {
-          // Attempt to parse error details from backend
-          const errorData = await response.json();
-          const errorMessage = errorData.detail || `Failed to fetch feed: ${response.statusText}`;
-          throw new Error(errorMessage);
-        }
-        
-        const data: PostRead[] = await response.json(); // Tell TypeScript the incoming data shape
-        setPosts(data);
+        const userData: UserRead = await userResponse.json();
+        setCurrentUser(userData); // Save current user details
+
+        // --- 2. Fetch Feed Posts ---
+        const feedResponse = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/feed`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+
+        if (feedResponse.status === 401) throw new Error("Session Expired"); // Check again, just in case
+        if (!feedResponse.ok) throw new Error("Failed to fetch feed");
+
+        const feedData: PostRead[] = await feedResponse.json();
+        setPosts(feedData);
 
       } catch (error) {
-        console.error("Error fetching feed:", error instanceof Error ? error.message : error);
-        Alert.alert("Error", "Could not fetch your feed. Please try again later.");
+        console.error("Error initializing feed:", error instanceof Error ? error.message : error);
+        if (error instanceof Error && error.message === "Session Expired") {
+          Alert.alert("Session Expired", "Please log in again.");
+          await AsyncStorage.removeItem("token");
+          router.replace("/(auth)/login");
+        } else {
+          Alert.alert("Error", "Could not load feed.");
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchFeed();
-  }, []); // Empty dependency array means this runs once on mount
+    initializeFeed();
+  }, []); // Run once on mount
 
+  // --- Handle Like/Unlike ---
+  const toggleLike = async (postId: number) => {
+     if (!currentUser) return; // Don't do anything if user isn't loaded yet
+
+    try {
+      const token = await AsyncStorage.getItem("token");
+      if (!token) {
+        router.replace("/(auth)/login");
+        return;
+      }
+
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/posts/${postId}/like`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+
+      if (response.status === 401) throw new Error("Session Expired"); // Throw error to be caught below
+      if (!response.ok) {
+         const errorData = await response.json();
+         throw new Error(errorData.detail || `Failed to toggle like`);
+      }
+
+      // --- Update UI Immediately ---
+      setPosts(currentPosts => currentPosts.map(post => {
+        if (post.id === postId) {
+          const alreadyLiked = post.likes.some(like => like.user.id === currentUser.id);
+          if (alreadyLiked) {
+            // Remove the like
+            return {
+              ...post,
+              likes: post.likes.filter(like => like.user.id !== currentUser.id)
+            };
+          } else {
+            // Add the like
+            return {
+              ...post,
+              likes: [...post.likes, { user: currentUser }] // Use the fetched currentUser object
+            };
+          }
+        }
+        return post;
+      }));
+
+    } catch (error) {
+       console.error("Error toggling like:", error instanceof Error ? error.message : error);
+        if (error instanceof Error && error.message === "Session Expired") {
+          Alert.alert("Session Expired", "Please log in again.");
+          await AsyncStorage.removeItem("token");
+          router.replace("/(auth)/login");
+        } else {
+           Alert.alert("Error", "Could not update like status.");
+        }
+    }
+  };
+
+  // --- Render UI ---
   if (isLoading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -98,11 +165,10 @@ export default function FeedScreen() {
     );
   }
 
-  // If there are no posts after loading
   if (posts.length === 0) {
     return (
       <View style={[styles.container, styles.emptyContainer]}>
-        <Text style={styles.emptyText}>No posts yet! Start following people or create your own.</Text>
+        <Text style={styles.emptyText}>Your feed is empty. Follow users or create posts!</Text>
       </View>
     );
   }
@@ -112,20 +178,42 @@ export default function FeedScreen() {
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.postContainer}>
-            {/* Display username */}
-            <Text style={styles.postUsername}>{item.user.username}</Text>
-            
-            {/* Display media_url if it exists */}
-            {item.media_url && (
-              <Image source={{ uri: item.media_url }} style={styles.postImage} />
-            )}
+        renderItem={({ item }) => {
+          // Check if the current user (if loaded) has liked this specific post
+          const isLikedByCurrentUser = !!currentUser && item.likes.some(like => like.user.id === currentUser.id);
 
-            {/* Display post description */}
-            <Text style={styles.postDescription}>{item.description}</Text>
-          </View>
-        )}
+          return (
+            <View style={styles.postContainer}>
+              <Text style={styles.postUsername}>{item.user.username}</Text>
+
+              {item.media_url && (
+                <Image source={{ uri: item.media_url }} style={styles.postImage} />
+              )}
+
+              <Text style={styles.postDescription}>{item.description}</Text>
+
+              {/* Like Button & Count */}
+              <View style={styles.actionsContainer}>
+                <Pressable
+                  onPress={() => toggleLike(item.id)}
+                  style={styles.actionButton}
+                  disabled={!currentUser} // Disable if currentUser isn't loaded yet
+                 >
+                  <Ionicons
+                    name={isLikedByCurrentUser ? "heart" : "heart-outline"}
+                    size={24}
+                    color={isLikedByCurrentUser ? "red" : "black"}
+                  />
+                </Pressable>
+                {item.likes.length > 0 && (
+                   <Text style={styles.likeCount}>{item.likes.length} like{item.likes.length !== 1 ? 's' : ''}</Text>
+                )}
+                {/* Comment Button (add later) */}
+              </View>
+
+            </View>
+          );
+        }}
       />
     </View>
   );
@@ -136,10 +224,11 @@ export default function FeedScreen() {
 // ====================================================================
 
 const styles = StyleSheet.create({
-  container: {
+    container: {
     flex: 1,
-    padding: 10,
-    backgroundColor: '#f9f9f9', // Light background
+    paddingTop: 10, // Added padding top
+    paddingHorizontal: 10, // Horizontal padding
+    backgroundColor: '#f9f9f9',
   },
   loadingContainer: {
     justifyContent: 'center',
@@ -151,6 +240,7 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   emptyContainer: {
+    flex: 1, // Make it take full height
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -164,12 +254,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 15,
-    marginBottom: 10,
+    marginBottom: 15,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowRadius: 2,
+    elevation: 2,
   },
   postUsername: {
     fontWeight: 'bold',
@@ -179,13 +269,31 @@ const styles = StyleSheet.create({
   },
   postImage: {
     width: '100%',
-    height: 200, // Fixed height for images
+    aspectRatio: 1,
     borderRadius: 8,
     marginBottom: 10,
-    resizeMode: 'cover', // Ensures image covers the area
+    backgroundColor: '#eee',
   },
   postDescription: {
     fontSize: 14,
-    color: '#666',
+    color: '#555',
+    lineHeight: 20,
   },
+  actionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  actionButton: {
+    padding: 5, // Add padding to make icon easier to tap
+    marginRight: 5, // Adjust spacing
+  },
+  likeCount: {
+      fontSize: 14,
+      color: '#555',
+      fontWeight: '600',
+  }
 });

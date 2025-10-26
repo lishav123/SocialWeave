@@ -208,3 +208,44 @@ def get_user_feed(
     ).all()
     
     return posts
+
+@app.post("/posts/{post_id}/like", status_code=status.HTTP_201_CREATED)
+def toggle_like_post(
+    post_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Likes or unlikes a post for the current user."""
+    
+    # 1. Look for an existing like by this user on this post
+    existing_like = session.exec(
+        select(Like).where(
+            Like.user_id == current_user.id,
+            Like.post_id == post_id
+        )
+    ).first()
+
+    # 2. If the like exists, delete it (unlike)
+    if existing_like:
+        session.delete(existing_like)
+        session.commit()
+        return {"message": "Post unliked successfully"}
+    
+    # 3. If the like does *not* exist, create it (like)
+    else:
+        new_like = Like(user_id=current_user.id, post_id=post_id)
+        session.add(new_like)
+        session.commit()
+        # We return 201 Created by default, but change it if needed
+        # Or return the new_like object if the frontend needs it
+        return {"message": "Post liked successfully"}
+
+# (In main.py)
+# Add this endpoint, usually near your other user-related routes
+
+@app.get("/users/me", response_model=UserRead)
+def read_users_me(
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Gets the profile for the currently logged-in user."""
+    return current_user
