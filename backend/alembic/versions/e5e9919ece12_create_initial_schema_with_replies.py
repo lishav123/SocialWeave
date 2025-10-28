@@ -1,19 +1,20 @@
-"""Create initial database schema
+"""Create initial schema (with replies)
 
-Revision ID: c1d193c6f91c
+Revision ID: e5e9919ece12
 Revises: 
-Create Date: 2025-10-25 14:49:18.590731
+Create Date: 2025-10-28 19:54:12.283846
 
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+
 import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'c1d193c6f91c'
+revision: str = 'e5e9919ece12'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -30,8 +31,10 @@ def upgrade() -> None:
     sa.Column('location', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_user_email'), 'user', ['email'], unique=True)
-    op.create_index(op.f('ix_user_username'), 'user', ['username'], unique=True)
+    with op.batch_alter_table('user', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_user_email'), ['email'], unique=True)
+        batch_op.create_index(batch_op.f('ix_user_username'), ['username'], unique=True)
+
     op.create_table('follow',
     sa.Column('follower_id', sa.Integer(), nullable=False),
     sa.Column('followed_id', sa.Integer(), nullable=False),
@@ -52,6 +55,8 @@ def upgrade() -> None:
     sa.Column('text', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('post_id', sa.Integer(), nullable=False),
+    sa.Column('parent_comment_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['parent_comment_id'], ['comment.id'], ),
     sa.ForeignKeyConstraint(['post_id'], ['post.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -73,7 +78,9 @@ def downgrade() -> None:
     op.drop_table('comment')
     op.drop_table('post')
     op.drop_table('follow')
-    op.drop_index(op.f('ix_user_username'), table_name='user')
-    op.drop_index(op.f('ix_user_email'), table_name='user')
+    with op.batch_alter_table('user', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_user_username'))
+        batch_op.drop_index(batch_op.f('ix_user_email'))
+
     op.drop_table('user')
     # ### end Alembic commands ###

@@ -86,6 +86,11 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+class CommentCreate(BaseModel):
+    """Data needed to create a new comment."""
+    text: str
+    parent_comment_id: int | None = None
+
 # ====================================================================
 #  API Endpoints ("Doors" 🚪)
 # ====================================================================
@@ -249,3 +254,28 @@ def read_users_me(
 ):
     """Gets the profile for the currently logged-in user."""
     return current_user
+
+@app.post("/posts/{post_id}/comments", response_model=CommentRead, status_code=status.HTTP_201_CREATED)
+def create_comment_on_post(
+    post_id: int,
+    comment_data: CommentCreate, # Our new "order form" 📝
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Creates a new comment on a specific post for the current user."""
+
+    # 1. Create the new Comment object
+    new_comment = Comment(
+        text=comment_data.text,
+        user_id=current_user.id,
+        post_id=post_id,
+        parent_comment_id=comment_data.parent_comment_id # <-- ADD THIS
+    )
+
+    # 2. Add, commit, and refresh
+    session.add(new_comment)
+    session.commit()
+    session.refresh(new_comment)
+
+    # 3. Return the new comment (FastAPI filters using CommentRead)
+    return new_comment

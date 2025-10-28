@@ -117,10 +117,16 @@ class Comment(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     text: str
     
-    # --- Foreign Keys (The "links") ---
-    user_id: int = Field(foreign_key="user.id") # Who wrote it
-    post_id: int = Field(foreign_key="post.id") # What post it's on
+    # --- Foreign Keys ---
+    user_id: int = Field(foreign_key="user.id")
+    post_id: int = Field(foreign_key="post.id")
+    # NEW: Link to parent comment (optional)
+    parent_comment_id: int | None = Field(default=None, foreign_key="comment.id")
 
     # --- Relationships ---
     user: "User" = Relationship(back_populates="comments")
     post: "Post" = Relationship(back_populates="comments")
+    # NEW: Relationship to parent comment
+    parent_comment: Optional["Comment"] = Relationship(back_populates="replies")
+    # NEW: Relationship to replies
+    replies: List["Comment"] = Relationship(back_populates="parent_comment")
