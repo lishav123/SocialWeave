@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from sqlmodel import Session, select, SQLModel
 from typing import Annotated, List
 from pydantic import BaseModel
+
+import shutil
+from pathlib import Path
 
 # --- Import Our App Modules ---
 from database import get_session
@@ -14,6 +17,9 @@ from auth import create_access_token, get_current_user
 # ====================================================================
 
 app = FastAPI()
+
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 # ====================================================================
 #  "Order Form" 📝 (Input Models)
