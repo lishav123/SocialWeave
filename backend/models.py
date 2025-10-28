@@ -129,4 +129,8 @@ class Comment(SQLModel, table=True):
     # NEW: Relationship to parent comment
     parent_comment: Optional["Comment"] = Relationship(back_populates="replies")
     # NEW: Relationship to replies
-    replies: List["Comment"] = Relationship(back_populates="parent_comment")
+    # (Inside the Comment class)
+    replies: List["Comment"] = Relationship(
+        back_populates="parent_comment",
+        sa_relationship_kwargs={"remote_side": "[Comment.id]"} 
+    )
