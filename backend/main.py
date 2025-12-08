@@ -62,12 +62,20 @@ class CommentCreate(BaseModel):
 # These models define the structure of data the API will send back.
 # They use Pydantic's BaseModel and `orm_mode` to safely read data
 # from our SQLModel database objects, hiding sensitive fields like passwords.
-
-class UserRead(BaseModel):
-    """Publicly viewable user data."""
+# 1. Define this FIRST (Small receipt for lists)
+class UserReadBasic(BaseModel):
     id: int
     username: str
+    profile_pic: str | None = None
+
+# 2. Define this SECOND (Full receipt)
+class UserRead(BaseModel):
+    id: int
+    username: str
+    email: str
     location: str | None = None
+    profile_pic: str | None = None
+    following: List[UserReadBasic] = [] 
 
     class Config:
         orm_mode = True # Allows reading data from SQLModel objects
@@ -463,3 +471,41 @@ def get_single_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
+
+@app.delete("/users/{user_id}/follow")
+def unfollow_user(
+    user_id: int, 
+    session: Annotated[Session, Depends(get_session)], 
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Unfollows a user."""
+    # 1. Find the specific connection row in the database
+    follow_link = session.exec(
+        select(Follow).where(
+            Follow.follower_id == current_user.id, 
+            Follow.followed_id == user_id
+        )
+    ).first()
+
+    # 2. If connection exists, delete it. If not, return 404 (which frontend handles).
+    if not follow_link:
+        raise HTTPException(status_code=404, detail="Not following")
+        
+    session.delete(follow_link)
+    session.commit()
+    return {"ok": True}
+
+@app.delete("/posts/{post_id}")
+def delete_post(
+    post_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this post")
+    session.delete(post)
+    session.commit()
+    return {"ok": True}

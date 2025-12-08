@@ -89,31 +89,25 @@ class User(SQLModel, table=True):
 # ====================================================================
 #  Core Model: Post 🖼️
 # ====================================================================
+# (In backend/models.py)
+
 class Post(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     description: str
     media_url: str | None = None
-    # We'll add media_url here later!
-    
-    # --- Foreign Keys (The "link") ---
-    
-    # "Many-to-One" (Post -> User)
-    # This is the *column* that stores which user made the post.
     user_id: int = Field(foreign_key="user.id")
 
-    # --- Relationships ---
-
-    # This is the *Python object* that links to the User.
     user: "User" = Relationship(back_populates="posts")
-
-    # "One-to-Many" (Post -> Comments)
-    # One Post can have many Comments.
-    comments: List["Comment"] = Relationship(back_populates="post")
     
-    # "One-to-Many" (Post -> Likes)
-    # One Post can have many Likes.
-    likes: List["Like"] = Relationship(back_populates="post")
-
+    comments: List["Comment"] = Relationship(
+        back_populates="post", 
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    
+    likes: List["Like"] = Relationship(
+        back_populates="post", 
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
 
 # ====================================================================
 #  Core Model: Comment 💬

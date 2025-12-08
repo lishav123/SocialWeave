@@ -15,6 +15,33 @@ export default function RootLayout() {
           title: 'Edit Profile'  // Or set headerShown: false if you use your own custom header
         }} 
       />
+
+      {/* ... existing screens ... */}
+      
+      <Stack.Screen 
+        name="user-profile" 
+        options={{ 
+          title: 'Profile', 
+          headerBackTitle: 'Back', // iOS back button text
+          headerShown: true // We want a header for back button
+        }} 
+      />
+      
+      <Stack.Screen 
+        name="comments" 
+        options={{ 
+          title: 'Comments',
+          presentation: 'modal', // Nice slide-up effect
+          headerShown: true 
+        }} 
+      />
+      <Stack.Screen 
+        name="post-details" 
+        options={{ 
+          title: 'Post',
+          headerBackTitle: 'Back',
+        }} 
+      />
     </Stack>
   );
 }

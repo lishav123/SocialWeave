@@ -8,6 +8,11 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  SafeAreaView,
+  Platform,
+  StatusBar,
+  KeyboardAvoidingView,
+  ScrollView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -28,6 +33,7 @@ export default function EditProfileScreen() {
   const [image, setImage] = useState<string | null>(null); // Local URI for preview
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
   const router = useRouter();
 
   // --- Load Current Data ---
@@ -47,8 +53,6 @@ export default function EditProfileScreen() {
           setUsername(data.username);
           setBio(data.bio || '');
           if (data.profile_pic) {
-             // For existing profile pic, we need the full URL for display
-             // BUT we store it in a way that distinguishes it from a new local upload
              setImage(`${process.env.EXPO_PUBLIC_API_URL}${data.profile_pic}`);
           }
         }
@@ -64,14 +68,16 @@ export default function EditProfileScreen() {
   // --- Pick Image ---
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    
+    // Use MediaTypeOptions which is the standard enum
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1], // Square for profile pics
       quality: 0.8,
     });
 
     if (!result.canceled) {
-      setImage(result.assets[0].uri); // Set local URI
+      setImage(result.assets[0].uri);
     }
   };
 
@@ -81,6 +87,14 @@ export default function EditProfileScreen() {
       Alert.alert("Error", "Username cannot be empty");
       return;
     }
+    
+    // Valid character check (optional, but good practice)
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    if (!usernameRegex.test(username)) {
+        Alert.alert("Invalid Username", "Username can only contain letters, numbers, and underscores.");
+        return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -92,10 +106,13 @@ export default function EditProfileScreen() {
       // 1. If image is a local URI (new upload), upload it first
       if (image && !image.startsWith('http')) {
         const formData = new FormData();
+        // Unique filename to prevent caching issues
+        const filename = image.split('/').pop() || `profile_${Date.now()}.jpg`;
+        
         formData.append('file', {
           uri: image,
-          type: 'image/jpeg', // Simplification
-          name: 'profile.jpg',
+          type: 'image/jpeg',
+          name: filename,
         } as any);
 
         const uploadResp = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/upload/image`, {
@@ -106,14 +123,14 @@ export default function EditProfileScreen() {
         
         if (!uploadResp.ok) throw new Error("Failed to upload image");
         const uploadResult = await uploadResp.json();
-        profilePicPath = uploadResult.file_path; // Get the path (e.g., /uploads/...)
+        profilePicPath = uploadResult.file_path;
       }
 
-      // 2. Update Profile Data
+      // 2. Update Profile Data (Username & Bio)
       const updateData = {
         username: username,
         bio: bio,
-        ...(profilePicPath && { profile_pic: profilePicPath }), // Only send if new image uploaded
+        ...(profilePicPath && { profile_pic: profilePicPath }), // Only send if new image
       };
 
       const updateResp = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/users/me`, {
@@ -125,13 +142,21 @@ export default function EditProfileScreen() {
         body: JSON.stringify(updateData),
       });
 
+      // --- ERROR HANDLING FOR USERNAME ---
       if (!updateResp.ok) {
          const err = await updateResp.json();
-         throw new Error(err.detail || "Update failed");
+         // Backend returns { detail: "Username already taken" }
+         if (updateResp.status === 400 && err.detail === "Username already taken") {
+             Alert.alert("Unavailable", `The username "${username}" is already taken. Please try another.`);
+         } else {
+             throw new Error(err.detail || "Update failed");
+         }
+         return; // Stop here if error
       }
 
+      // Success
       Alert.alert("Success", "Profile updated!");
-      router.back(); // Go back to Profile tab
+      router.back(); 
 
     } catch (error) {
       console.error(error);
@@ -142,65 +167,86 @@ export default function EditProfileScreen() {
   };
 
   if (isLoading) {
-    return <View style={styles.loadingContainer}><ActivityIndicator /></View>;
+    return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#007AFF" /></View>;
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>Edit Profile</Text>
-        <Pressable onPress={handleSave} disabled={isSaving}>
-          <Text style={styles.saveText}>{isSaving ? "Saving..." : "Done"}</Text>
-        </Pressable>
-      </View>
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={styles.container}>
+          
+          {/* Header */}
+          <View style={styles.header}>
+            <Pressable onPress={() => router.back()}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+            <Text style={styles.headerTitle}>Edit Profile</Text>
+            <Pressable onPress={handleSave} disabled={isSaving}>
+              {isSaving ? <ActivityIndicator size="small" color="#007AFF"/> : <Text style={styles.saveText}>Done</Text>}
+            </Pressable>
+          </View>
 
-      <View style={styles.form}>
-        {/* Image Picker */}
-        <Pressable style={styles.imageContainer} onPress={pickImage}>
-          {image ? (
-            <Image source={{ uri: image }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.placeholder]}>
-              <Ionicons name="camera" size={40} color="#999" />
+          <View style={styles.form}>
+            {/* Image Picker */}
+            <Pressable style={styles.imageContainer} onPress={pickImage}>
+              {image ? (
+                <Image source={{ uri: image }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.placeholder]}>
+                  <Ionicons name="camera" size={40} color="#999" />
+                </View>
+              )}
+              <Text style={styles.changePhotoText}>Change Profile Photo</Text>
+            </Pressable>
+
+            {/* Username Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Username</Text>
+              <TextInput 
+                style={styles.input} 
+                value={username} 
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                placeholder="Enter username"
+                placeholderTextColor="#ccc"
+              />
+              <Text style={styles.hint}>Used for search and mentions.</Text>
             </View>
-          )}
-          <Text style={styles.changePhotoText}>Change Profile Photo</Text>
-        </Pressable>
 
-        {/* Inputs */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Username</Text>
-          <TextInput 
-            style={styles.input} 
-            value={username} 
-            onChangeText={setUsername}
-            autoCapitalize="none"
-          />
-        </View>
+            {/* Bio Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Bio</Text>
+              <TextInput 
+                style={[styles.input, styles.bioInput]} 
+                value={bio} 
+                onChangeText={setBio}
+                multiline
+                maxLength={150}
+                placeholder="Write something about yourself..."
+                placeholderTextColor="#ccc"
+              />
+              <Text style={styles.hint}>{bio.length} / 150</Text>
+            </View>
+          </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Bio</Text>
-          <TextInput 
-            style={[styles.input, styles.bioInput]} 
-            value={bio} 
-            onChangeText={setBio}
-            multiline
-            maxLength={150}
-          />
-        </View>
-      </View>
-    </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: { 
+    flex: 1, 
+    backgroundColor: '#fff', 
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
+  },
   container: {
-    flex: 1,
     backgroundColor: '#fff',
-    paddingTop: 50, // For status bar
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,
@@ -212,7 +258,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 15,
-    paddingBottom: 15,
+    paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
@@ -240,23 +286,32 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     marginTop: 10,
     fontSize: 16,
+    fontWeight: '500',
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 25,
   },
   label: {
     color: '#666',
-    marginBottom: 5,
+    marginBottom: 8,
     fontSize: 14,
+    fontWeight: '600',
   },
   input: {
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
-    paddingVertical: 8,
+    paddingVertical: 10,
     fontSize: 16,
+    color: '#000',
   },
   bioInput: {
     minHeight: 60,
-    textAlignVertical: 'top', // For Android multiline
+    textAlignVertical: 'top', 
   },
+  hint: {
+      marginTop: 5,
+      fontSize: 12,
+      color: '#888',
+      textAlign: 'right',
+  }
 });

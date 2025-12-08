@@ -3,123 +3,72 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
-  StyleSheet,
   Image,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
   Alert,
-  ActivityIndicator, // For loading state during upload
-  Platform, // To handle platform-specific details if needed
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-
-// ====================================================================
-//  TypeScript Type Definitions
-// ====================================================================
-
-// Structure for the result from the image picker
-type ImagePickerAsset = {
-  uri: string;
-  type?: string | null; // Mime type (e.g., 'image/jpeg')
-  fileName?: string | null; // Original filename
-};
-
-// Structure for the response from the /upload/image endpoint
-type FilePathResponse = {
-  file_path: string; // e.g., "/uploads/my_image.jpg"
-};
-
-// ====================================================================
-//  UploadScreen Component 📱
-// ====================================================================
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function UploadScreen() {
+  const [image, setImage] = useState<string | null>(null);
   const [description, setDescription] = useState('');
-  const [imageAsset, setImageAsset] = useState<ImagePickerAsset | null>(null); // Holds selected image details
-  const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const router = useRouter();
 
-  // --- Function to pick an image ---
   const pickImage = async () => {
-    // Request permission (important for iOS)
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert("Permission Required", "Allow access to your photos to upload images.");
-      return;
-    }
-
-    // Launch gallery
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, // Correct property for images
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      aspect: [1, 1], // Square crop
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      // Get the first selected asset
-      const asset = result.assets[0];
-      // Store the necessary details (uri is essential)
-      setImageAsset({
-        uri: asset.uri,
-        type: asset.mimeType, // Get mime type if available
-        fileName: asset.fileName || `photo_${Date.now()}.jpg`, // Generate a filename if needed
-      });
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
     }
   };
 
-  // --- Function to handle the upload process ---
   const handleUpload = async () => {
-    if (!imageAsset) {
-      Alert.alert("No Image Selected", "Please select an image first.");
+    if (!image) {
+      Alert.alert("No Image", "Please select an image first.");
       return;
     }
-    if (isLoading) return; // Prevent multiple uploads
-    setIsLoading(true);
+    setIsUploading(true);
 
     try {
       const token = await AsyncStorage.getItem("token");
-      if (!token) {
-        Alert.alert("Authentication Error", "Please log in again.");
-        router.replace("/(auth)/login");
-        setIsLoading(false);
-        return;
-      }
+      if (!token) { router.replace("/(auth)/login"); return; }
 
-      // --- Step 1: Upload the Image File ---
-      // Create FormData to send the file
+      // 1. Upload Image
       const formData = new FormData();
-      // Append the file. The key 'file' MUST match the backend endpoint parameter name.
+      const filename = `upload_${Date.now()}.jpg`;
+      
       formData.append('file', {
-        uri: imageAsset.uri,
-        // Use a generic type if specific type isn't available, or derive from URI extension
-        type: imageAsset.type || 'image/jpeg',
-        name: imageAsset.fileName || 'upload.jpg',
-      } as any); // Use 'as any' to bypass strict type checking for FormData append if needed
+        uri: image,
+        name: filename,
+        type: 'image/jpeg',
+      } as any);
 
-
-      const uploadResponse = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/upload/image`, {
+      const uploadRes = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/upload/image`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          // 'Content-Type': 'multipart/form-data' // fetch automatically sets this for FormData
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       });
 
-      if (uploadResponse.status === 401) throw new Error("Session Expired");
-      if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json();
-        throw new Error(errorData.detail || `Image upload failed: ${uploadResponse.statusText}`);
-      }
+      if (!uploadRes.ok) throw new Error("Image upload failed");
+      const uploadData = await uploadRes.json();
+      const serverFilePath = uploadData.file_path;
 
-      const uploadResult: FilePathResponse = await uploadResponse.json();
-      const mediaUrlFromServer = uploadResult.file_path; // e.g., "/uploads/image.jpg"
-
-      // --- Step 2: Create the Post with the Image URL ---
-      const postResponse = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/posts`, {
+      // 2. Create Post
+      const postRes = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/posts`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -127,147 +76,196 @@ export default function UploadScreen() {
         },
         body: JSON.stringify({
           description: description,
-          media_url: mediaUrlFromServer, // Send the path received from the upload endpoint
+          media_url: serverFilePath,
         }),
       });
 
-       if (postResponse.status === 401) throw new Error("Session Expired"); // Check again
-       if (!postResponse.ok) {
-        const errorData = await postResponse.json();
-        throw new Error(errorData.detail || `Post creation failed: ${postResponse.statusText}`);
-      }
+      if (!postRes.ok) throw new Error("Post creation failed");
 
-      // Success!
-      Alert.alert("Upload Successful", "Your post has been created.");
-      setImageAsset(null); // Clear image preview
-      setDescription(''); // Clear description
-      // Navigate to the Feed screen after successful upload
-      router.push('/(tabs)'); // Navigate to the feed (index) within the tabs group
+      // Reset & Redirect
+      Alert.alert("Success", "Post uploaded!");
+      setImage(null);
+      setDescription('');
+      router.push("/(tabs)"); 
 
     } catch (error) {
-      console.error("Error during upload:", error instanceof Error ? error.message : error);
-      if (error instanceof Error && error.message === "Session Expired") {
-         Alert.alert("Session Expired", "Please log in again.");
-         await AsyncStorage.removeItem("token");
-         router.replace("/(auth)/login");
-      } else {
-        Alert.alert("Upload Failed", error instanceof Error ? error.message : "An unexpected error occurred.");
-      }
+      console.error(error);
+      Alert.alert("Error", "Upload failed. Check connection.");
     } finally {
-      setIsLoading(false); // Ensure loading indicator stops
+      setIsUploading(false);
     }
   };
 
-  // --- Render UI ---
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create New Post</Text>
-
-      {/* Image Picker Area */}
-      <Pressable style={styles.imagePicker} onPress={pickImage}>
-        {imageAsset ? (
-          <Image source={{ uri: imageAsset.uri }} style={styles.imagePreview} />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Ionicons name="camera-outline" size={40} color="#888" />
-            <Text style={styles.imagePickerText}>Select Image</Text>
-          </View>
-        )}
-      </Pressable>
-
-      {/* Description Input */}
-      <TextInput
-        style={styles.input}
-        placeholder="Write a description..."
-        value={description}
-        onChangeText={setDescription}
-        multiline
-      />
-
-      {/* Upload Button */}
-      <Pressable
-        style={[styles.button, (isLoading || !imageAsset) && styles.buttonDisabled]}
-        onPress={handleUpload}
-        disabled={isLoading || !imageAsset} // Disable if loading or no image selected
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        style={styles.container}
       >
-        {isLoading ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Upload Post</Text>
-        )}
-      </Pressable>
-    </View>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Upload</Text>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.content}>
+          
+          {/* 1. Big Image Picker Area */}
+          <Pressable onPress={pickImage} style={styles.imageContainer}>
+            {image ? (
+              <Image source={{ uri: image }} style={styles.previewImage} />
+            ) : (
+              <View style={styles.placeholder}>
+                <Ionicons name="cloud-upload-outline" size={60} color="#007AFF" />
+                <Text style={styles.placeholderText}>Tap to select an image</Text>
+              </View>
+            )}
+            {/* Overlay Icon to change image if already selected */}
+            {image && (
+              <View style={styles.editIconOverlay}>
+                <Ionicons name="pencil" size={20} color="#fff" />
+              </View>
+            )}
+          </Pressable>
+
+          {/* 2. Caption Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Caption</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="What's on your mind?"
+              multiline
+              value={description}
+              onChangeText={setDescription}
+              placeholderTextColor="#999"
+            />
+          </View>
+
+        </ScrollView>
+
+        {/* 3. Big Bottom Button */}
+        <View style={styles.footer}>
+          <Pressable 
+            style={[styles.postBtn, (!image || isUploading) && styles.disabledBtn]} 
+            onPress={handleUpload}
+            disabled={!image || isUploading}
+          >
+            {isUploading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.postBtnText}>Post</Text>
+            )}
+          </Pressable>
+        </View>
+
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-// ====================================================================
-//  Styles
-// ====================================================================
-
 const styles = StyleSheet.create({
-  // (Styles remain largely the same as the previous version)
-   container: {
+  safeArea: {
     flex: 1,
-    padding: 20,
     backgroundColor: '#fff',
   },
-  title: {
-    fontSize: 22,
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    alignItems: 'center', // Center the title
+  },
+  headerTitle: {
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
+    color: '#007AFF',
   },
-  imagePicker: {
+  content: {
+    padding: 20,
+  },
+  // Big Image Styles
+  imageContainer: {
     width: '100%',
-    aspectRatio: 1, // Make it square
-    backgroundColor: '#f0f0f0',
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    aspectRatio: 1, // Makes it a square
+    borderRadius: 15,
     overflow: 'hidden',
+    marginBottom: 25,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 2,
+    borderColor: '#e1e8ed',
+    borderStyle: 'dashed', // Nice dashed border effect
   },
-  imagePlaceholder: {
-    alignItems: 'center',
-  },
-  imagePickerText: {
-    color: '#888',
-    marginTop: 5,
-  },
-  imagePreview: {
+  previewImage: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
+  },
+  placeholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  editIconOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 8,
+    borderRadius: 20,
+  },
+  // Input Styles
+  inputContainer: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    marginLeft: 4,
   },
   input: {
-    minHeight: 100, // Slightly taller for description
-    borderColor: '#ccc',
-    borderWidth: 1,
-    borderRadius: 8,
-    marginBottom: 20,
-    paddingHorizontal: 12, // Use horizontal padding
-    paddingTop: 12,       // Consistent padding top
-    paddingBottom: 12,    // Add padding bottom
+    backgroundColor: '#f0f2f5',
+    borderRadius: 10,
+    padding: 15,
     fontSize: 16,
+    minHeight: 100, // Tall input box
     textAlignVertical: 'top',
+    color: '#000',
   },
-  button: {
+  // Footer Button Styles
+  footer: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  postBtn: {
     backgroundColor: '#007AFF',
-    padding: 14,
-    borderRadius: 8,
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
-    flexDirection: 'row', // Allow indicator and text side-by-side
-    justifyContent: 'center', // Center content horizontally
-    minHeight: 50, // Ensure button has a consistent height
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5, // Android shadow
   },
-  buttonDisabled: {
-    backgroundColor: '#99c2ff',
+  disabledBtn: {
+    backgroundColor: '#A0CFFF',
+    shadowOpacity: 0,
+    elevation: 0,
   },
-  buttonText: {
-    color: 'white',
+  postBtnText: {
+    color: '#fff',
+    fontSize: 18,
     fontWeight: 'bold',
-    fontSize: 16,
-    marginLeft: 5, // Space text away from indicator if loading
   },
 });
