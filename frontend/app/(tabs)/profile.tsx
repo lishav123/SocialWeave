@@ -180,29 +180,26 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center', // Center content vertically
-    alignItems: 'center', // Center content horizontally
-    padding: 20,
-    backgroundColor: '#fff',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 30, // Add more space below title
-  },
-  logoutButton: {
-    backgroundColor: '#FF3B30', // Red color for logout
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 20, // Space above the button
-  },
-  logoutButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
+  safeArea: { flex: 1, backgroundColor: '#fff' },
+  loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  headerContainer: { padding: 15, paddingBottom: 20 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 15, color: '#007AFF' },
+  topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  avatar: { width: 80, height: 80, borderRadius: 40, marginRight: 20 },
+  placeholder: { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
+  stats: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
+  statBox: { alignItems: 'center' },
+  statNum: { fontSize: 18, fontWeight: 'bold', color: '#000' },
+  statLabel: { fontSize: 13, color: '#666' },
+  name: { fontSize: 16, fontWeight: 'bold', color: '#000' },
+  bio: { marginTop: 4, color: '#333', lineHeight: 20 },
+  btnRow: { flexDirection: 'row', marginTop: 20 },
+  editBtn: { flex: 1, backgroundColor: '#f0f0f0', paddingVertical: 8, borderRadius: 6, alignItems: 'center', marginRight: 10, borderWidth: 1, borderColor: '#ddd' },
+  editBtnText: { fontWeight: '600', color: '#000' },
+  logoutBtn: { backgroundColor: '#FF3B30', paddingHorizontal: 15, justifyContent: 'center', alignItems: 'center', borderRadius: 6 },
+  gridItem: { width: IMAGE_SIZE, height: IMAGE_SIZE, borderWidth: 0.5, borderColor: '#fff' },
+  gridImage: { width: '100%', height: '100%' },
+  gridTextPlaceholder: { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
+  emptyContainer: { alignItems: 'center', marginTop: 50 },
+  emptyText: { marginTop: 10, color: '#888', fontSize: 16 },
 });
