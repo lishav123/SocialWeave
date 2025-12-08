@@ -110,6 +110,25 @@ class FilePathResponse(BaseModel):
     file_path: str
 
 
+class UserProfileRead(BaseModel):
+    """Rich profile data including stats."""
+    id: int
+    username: str
+    location: str | None = None
+    bio: str | None = None
+    profile_pic: str | None = None
+    
+    # Stats
+    followers_count: int
+    following_count: int
+    posts_count: int
+
+class UserUpdate(SQLModel):
+    """Data allowed to be updated by the user."""
+    username: str | None = None
+    bio: str | None = None
+    profile_pic: str | None = None # URL from upload
+
 # ====================================================================
 #  API Endpoints ("Doors" 🚪)
 # ====================================================================
@@ -360,3 +379,87 @@ def get_user_feed(
 # This allows the frontend to access images via URLs like http://.../uploads/image.jpg
 from fastapi.staticfiles import StaticFiles
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# (In main.py - User Doors)
+
+@app.get("/users/{user_id}/profile", response_model=UserProfileRead)
+def get_user_profile(
+    user_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    # We don't strictly need current_user to VIEW a profile, 
+    # but you might want it later to check "am I following this person?"
+    # For now, let's keep it open or add auth if you prefer privacy.
+    current_user: Annotated[User, Depends(get_current_user)] 
+):
+    """Gets a user's profile with stats."""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return UserProfileRead(
+        id=user.id,
+        username=user.username,
+        location=user.location,
+        bio=user.bio,
+        profile_pic=user.profile_pic,
+        followers_count=len(user.followers),
+        following_count=len(user.following),
+        posts_count=len(user.posts)
+    )
+
+@app.get("/users/{user_id}/posts", response_model=List[PostRead])
+def get_user_posts(
+    user_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Gets all posts for a specific user (for their profile grid)."""
+    posts = session.exec(
+        select(Post)
+        .where(Post.user_id == user_id)
+        .order_by(Post.id.desc())
+    ).all()
+    return posts
+
+# (In main.py)
+
+@app.patch("/users/me", response_model=UserRead)
+def update_user_profile(
+    user_update: UserUpdate,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Updates the current user's profile."""
+    
+    # Update fields if they are provided
+    if user_update.username:
+        # Check uniqueness if username is changing
+        if user_update.username != current_user.username:
+            existing_user = session.exec(select(User).where(User.username == user_update.username)).first()
+            if existing_user:
+                raise HTTPException(status_code=400, detail="Username already taken")
+        current_user.username = user_update.username
+        
+    if user_update.bio is not None:
+        current_user.bio = user_update.bio
+        
+    if user_update.profile_pic is not None:
+        current_user.profile_pic = user_update.profile_pic
+
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+@app.get("/posts/{post_id}", response_model=PostRead)
+def get_single_post(
+    post_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    # Optional: require auth if you want private posts
+    # current_user: Annotated[User, Depends(get_current_user)] 
+):
+    """Get a single post details (useful for comments screen)."""
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post

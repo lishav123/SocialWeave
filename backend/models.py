@@ -46,6 +46,11 @@ class User(SQLModel, table=True):
     username: str = Field(index=True, unique=True)
     hashed_password: str
     location: Optional[str] = None
+    
+    # --- NEW FIELDS ---
+    bio: str | None = None
+    profile_pic: str | None = None # URL to the image
+    # ------------------
 
     # --- Relationships ---
 
