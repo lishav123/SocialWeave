@@ -2,6 +2,9 @@ import shutil
 from pathlib import Path
 from typing import Annotated, List
 
+import cloudinary
+import cloudinary.uploader
+
 from fastapi import (
     FastAPI,
     Depends,
@@ -22,6 +25,14 @@ from auth import create_access_token, get_current_user
 # ====================================================================
 #  App Initialization & Configuration
 # ====================================================================
+
+# Configure Cloudinary using environment variables
+cloudinary.config( 
+  cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME"), 
+  api_key = os.environ.get("CLOUDINARY_API_KEY"), 
+  api_secret = os.environ.get("CLOUDINARY_API_SECRET"),
+  secure = True
+)
 
 app = FastAPI(title="SocialWeave API", description="API for the SocialWeave app")
 
@@ -253,28 +264,23 @@ def follow_user(
     return {"message": f"Successfully followed user {user_id_to_follow}"}
 
 # --- Post Creation & Interaction Endpoints (Locked 🔒) ---
-@app.post("/upload/image", response_model=FilePathResponse, status_code=status.HTTP_201_CREATED)
-async def upload_image(
-    # Requires authentication to upload images
-    current_user: Annotated[User, Depends(get_current_user)],
-    file: UploadFile = File(...) # Expects form data with a 'file' field
-):
-    """Handles image uploads, saves the file, and returns its relative path."""
+@app.post("/upload/image")
+async def upload_image(file: UploadFile = File(...), session: Annotated[Session, Depends(get_session)], current_user: Annotated[User, Depends(get_current_user)]):
+    """
+    Uploads an image to Cloudinary and returns the URL.
+    """
     try:
-        # Consider generating a unique filename to prevent overwrites and improve security
-        # e.g., using uuid.uuid4() or user_id + timestamp
-        file_location = UPLOAD_DIR / file.filename
-        with open(file_location, "wb+") as file_object:
-            shutil.copyfileobj(file.file, file_object)
-
-        # Return path relative to the server root (used for media_url)
-        return FilePathResponse(file_path=f"/uploads/{file.filename}")
+        # Upload the file directly to Cloudinary
+        # "socialweave" is the folder name in your Cloudinary dashboard
+        result = cloudinary.uploader.upload(file.file, folder="socialweave")
+        
+        # Get the secure URL (https)
+        url = result.get("secure_url")
+        
+        return {"file_path": url}
+        
     except Exception as e:
-        print(f"Error during file upload: {e}") # Log error for debugging
-        raise HTTPException(status_code=500, detail=f"Failed to upload image: {e}")
-    finally:
-        await file.close() # Important to close the file handle
-
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
 
 @app.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
 def create_post(
