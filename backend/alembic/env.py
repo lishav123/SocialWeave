@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -8,7 +9,7 @@ from alembic import context
 from models import User, Post
 
 # Import SQLModel's metadata
-from sqlmodel import SQLModel 
+from sqlmodel import SQLModel
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -62,8 +63,21 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # 1. Get the configuration from the .ini file
+    configuration = config.get_section(config.config_ini_section, {})
+
+    # 2. Check for the DATABASE_URL environment variable (from Render/Neon)
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        # Fix for Postgres URLs starting with "postgres://"
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        # Override the URL in the configuration
+        configuration["sqlalchemy.url"] = db_url
+
+    # 3. Create the engine using the updated configuration
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
