@@ -265,7 +265,12 @@ def follow_user(
 
 # --- Post Creation & Interaction Endpoints (Locked 🔒) ---
 @app.post("/upload/image")
-async def upload_image(file: UploadFile = File(...), session: Annotated[Session, Depends(get_session)], current_user: Annotated[User, Depends(get_current_user)]):
+async def upload_image(
+    session: Annotated[Session, Depends(get_session)], 
+    current_user: Annotated[User, Depends(get_current_user)],
+    file: UploadFile = File(...) 
+):
+    # ... rest of the function stays the same ...
     """
     Uploads an image to Cloudinary and returns the URL.
     """
